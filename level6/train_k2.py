@@ -14,7 +14,7 @@ from level4.model import AntiCommunityGNN
 
 def compute_hard_score(node_ids, assignments, edge_index, edge_weight):
     """
-    Compute the hard anti-community score S(G,2)
+    Compute the hard anti-community score S(G,k)
     using hard assignments from argmax.
     """
     intra_weight = 0.0
@@ -35,7 +35,7 @@ def compute_hard_score(node_ids, assignments, edge_index, edge_weight):
             if assignments[u].item() == assignments[v].item():
                 intra_weight += w
 
-    score = 1.0 - (intra_weight / total_weight) if total_weight > 0 else 0.0
+    score = 1.0 - (intra_weight / total_weight)
     return score, intra_weight, total_weight
 
 
@@ -61,12 +61,26 @@ def soft_anticommunity_loss(p, edge_index, edge_weight):
 
 
 if __name__ == "__main__":
-    data, node_ids = load_gnn_input("level2/gnn_input.json")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Train Anti-Community GNN Model")
+    parser.add_argument("--input-dir", type=str, default="level2",
+                       help="Input directory containing gnn_input.json")
+    parser.add_argument("--k", type=int, default=2,
+                       help="Number of partitions (2 for bipartite, 3 for 3-partite)")
+    
+    args = parser.parse_args()
+    
+    json_path = f"{args.input_dir}/gnn_input.json"
+    
+    print(f"Loading data from: {json_path}")
+    data, node_ids = load_gnn_input(json_path)
 
-    model = AntiCommunityGNN(in_channels=2, hidden_channels=8, out_channels=2)
+    print(f"Creating model with k={args.k}")
+    model = AntiCommunityGNN(in_channels=args.k, hidden_channels=8, out_channels=args.k)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-    epochs = 10000
+    epochs = 1000
     loss_history = []
 
     for epoch in range(1, epochs + 1):
@@ -103,7 +117,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         p = model(data.x, data.edge_index, data.edge_weight)
         assignments = torch.argmax(p, dim=1)
-        hard_one_hot = F.one_hot(assignments, num_classes=2).float()
+        hard_one_hot = F.one_hot(assignments, num_classes=args.k).float()
 
         score, intra_weight, total_weight = compute_hard_score(
             node_ids,
@@ -115,7 +129,7 @@ if __name__ == "__main__":
     print("\nFinal hard score:")
     print("Intra-cluster weight:", intra_weight)
     print("Total edge weight:", total_weight)
-    print("S(G,2):", score)
+    print(f"S(G,{args.k}):", score)
 
     print("\nFirst 10 hard assignments:")
     print(assignments[:10])
@@ -123,12 +137,10 @@ if __name__ == "__main__":
     print("\nFirst 10 hard one-hot vectors:")
     print(hard_one_hot[:10])
 
-    num_cluster_0 = (assignments == 0).sum().item()
-    num_cluster_1 = (assignments == 1).sum().item()
-
     print("\nCluster sizes:")
-    print("Cluster 0:", num_cluster_0)
-    print("Cluster 1:", num_cluster_1)
+    for i in range(args.k):
+        num_cluster_i = (assignments == i).sum().item()
+        print(f"Cluster {i}: {num_cluster_i}")
 
     results = {
         "score": score,

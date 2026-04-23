@@ -1,0 +1,32 @@
+============================================================
+BIPARTITE GRAPH ANALYSIS
+============================================================
+Generated: 2026-04-23 13:55:24
+============================================================
+
+
+✓ Is the graph bipartite? True
+
+📊 CLASS SIZES:
+  Class 1 size: 2794
+  Class 2 size: 7220
+  Total nodes: 10014
+
+📋 NODE TYPES DISTRIBUTION:
+  user: 7220
+  election: 2794
+
+🔍 TYPE DISTRIBUTION PER CLASS:
+
+  Class 1:
+    election: 2794
+
+  Class 2:
+    user: 7220
+
+📈 GRAPH STATISTICS:
+  Total edges: 119045
+  Total nodes: 10014
+  Density: 0.0024
+
+============================================================

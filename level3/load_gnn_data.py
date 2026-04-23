@@ -26,8 +26,16 @@ def load_gnn_input(json_path):
 
 
 if __name__ == "__main__":
-    json_path = "level2/gnn_input.json"
-
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Load GNN Input Data")
+    parser.add_argument("--input-dir", type=str, default="level2",
+                       help="Input directory containing gnn_input.json")
+    
+    args = parser.parse_args()
+    
+    json_path = f"{args.input_dir}/gnn_input.json"
+    
     data, node_ids = load_gnn_input(json_path)
 
     print("PyG Data loaded successfully")
