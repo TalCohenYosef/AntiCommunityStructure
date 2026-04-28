@@ -13,7 +13,7 @@ set -e
 # ============================================================================
 
 # Default parameters
-DIM=2
+DIM=3
 EDGES="level1/edges.txt"
 NODES="level1/nodes.txt"
 OUTPUT_DIR="level2"
