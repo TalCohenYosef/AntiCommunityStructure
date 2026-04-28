@@ -2,14 +2,14 @@ import networkx as nx
 import pandas as pd
 from datetime import datetime
 
-def check_and_analyze_bipartite(nodes_file='nodes.txt', edges_file='edges.txt', output_file='bipartite_analysis.txt'):
+def check_and_analyze_bipartite(nodes_file='nodes.txt', edges_file='edges_copy.txt', output_file='bipartite_analysis.txt'):
     """
     Check if the graph is bipartite and print the sizes of each class.
     Save results to a text file.
     
     Args:
         nodes_file: Path to nodes.txt file
-        edges_file: Path to edges.txt file
+        edges_file: Path to edges_copy.txt file
         output_file: Path to output text file
     """
     

@@ -14,10 +14,11 @@ set -e
 
 # Default parameters
 DIM=2
-EDGES="level1/edges.txt"
-NODES="level1/nodes.txt"
+EDGES="level1/small_edges.txt"
+NODES="level1/small_nodes.txt"
 OUTPUT_DIR="level2"
 SEED=42
+RANDOM_EDGE_PERCENT=0.02
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -36,6 +37,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --output-dir)
             OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --random-edge-percent)
+            RANDOM_EDGE_PERCENT="$2"
             shift 2
             ;;
         --seed)
@@ -89,7 +94,8 @@ python level2/generate_input_to_gnn.py \
     --edges "${EDGES}" \
     --dim "${DIM}" \
     --seed "${SEED}" \
-    --output-dir "${OUTPUT_DIR}"
+    --output-dir "${OUTPUT_DIR}"\
+    --random-edge-percent "$RANDOM_EDGE_PERCENT"
 echo ""
 
 # Step 2: Load GNN data

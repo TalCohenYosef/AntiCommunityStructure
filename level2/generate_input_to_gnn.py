@@ -95,6 +95,41 @@ def load_edges(edges_path, node_to_idx):
 
     return edge_index, edge_weight
 
+def add_random_edges(edge_index, edge_weight, num_nodes, percent, seed=42):
+    random.seed(seed)
+
+    num_existing_undirected = len(edge_index) // 2
+    num_new_undirected = int(num_existing_undirected * percent)
+
+    existing = set()
+    for u, v in edge_index:
+        existing.add((min(u, v), max(u, v)))
+
+    new_edges_added = 0
+
+    while new_edges_added < num_new_undirected:
+        u = random.randint(0, num_nodes - 1)
+        v = random.randint(0, num_nodes - 1)
+
+        if u == v:
+            continue
+
+        key = (min(u, v), max(u, v))
+
+        if key in existing:
+            continue
+
+        existing.add(key)
+
+        edge_index.append([u, v])
+        edge_index.append([v, u])
+
+        edge_weight.append(1.0)
+        edge_weight.append(1.0)
+
+        new_edges_added += 1
+
+    return edge_index, edge_weight, new_edges_added
 
 def save_gnn_input_json(output_path, node_ids, x_init, edge_index, edge_weight):
     data = {
@@ -148,6 +183,12 @@ if __name__ == "__main__":
         help="Output directory for generated files (default: level2)"
     )
     
+    parser.add_argument(
+    "--random-edge-percent",
+    type=float,
+    default=0.0,
+    help="Percent of random edges to add relative to existing undirected edges"
+)
     args = parser.parse_args()
     
     # Validate inputs
@@ -202,6 +243,19 @@ if __name__ == "__main__":
 
     edge_index, edge_weight = load_edges(args.edges, node_to_idx)
     print(f"  ✓ Loaded {len(edge_index)} directed edges")
+
+
+    if args.random_edge_percent > 0:
+        edge_index, edge_weight, added = add_random_edges(
+            edge_index,
+            edge_weight,
+            num_nodes=len(node_ids),
+            percent=args.random_edge_percent,
+            seed=args.seed
+        )
+
+        print(f"  ✓ Added {added} random undirected edges")
+        print(f"  ✓ Total directed edges after addition: {len(edge_index)}")
 
     save_gnn_input_json(
         gnn_output_path,

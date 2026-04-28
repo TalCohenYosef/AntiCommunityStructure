@@ -12,11 +12,12 @@ from level3.load_gnn_data import load_gnn_input
 from level4.model import AntiCommunityGNN
 
 
-def compute_hard_score(node_ids, assignments, edge_index, edge_weight):
+def compute_hard_score(assignments, edge_index, edge_weight):
     """
-    Compute the hard anti-community score S(G,k)
-    using hard assignments from argmax.
+    Old clean anti-community score:
+    S(G,k) = 1 - intra_weight / total_weight
     """
+
     intra_weight = 0.0
     total_weight = 0.0
 
@@ -36,6 +37,7 @@ def compute_hard_score(node_ids, assignments, edge_index, edge_weight):
                 intra_weight += w
 
     score = 1.0 - (intra_weight / total_weight)
+
     return score, intra_weight, total_weight
 
 
@@ -48,67 +50,57 @@ def soft_anticommunity_loss(p, edge_index, edge_weight):
     ew = edge_weight[mask]
 
     dot_products = (p[src] * p[dst]).sum(dim=1)
-    loss = (ew * dot_products).sum() 
+    loss = (ew * dot_products).sum()
     return loss
 
-def min_cluster_usage_penalty(p, min_fraction=0.01):
+def hard_empty_penalty_st(p, min_nodes_per_cluster=20):
     """
-    Penalizes clusters that are nearly or completely empty.
-    min_fraction = minimum fraction of nodes a cluster should receive (default: 1%)
-    
-    Example: For 9000 nodes split 2000/7000:
-        - Cluster with 22% -> no penalty
-        - Cluster with 78% -> no penalty
-        - Empty cluster 0% -> large penalty
+    Strong empty-cluster penalty using hard argmax sizes,
+    with straight-through estimator.
     """
-    mean_p = p.mean(dim=0)  # [k] - average probability mass per cluster
-    
-    # Only penalize clusters below min_fraction
-    penalty = torch.relu(min_fraction - mean_p).sum()
-    
+
+    n, k = p.shape
+
+    hard_assignments = torch.argmax(p, dim=1)
+    hard_one_hot = F.one_hot(hard_assignments, num_classes=k).float()
+
+    # forward behaves like hard_one_hot, backward behaves like p
+    z = hard_one_hot + p - p.detach()
+
+    cluster_sizes = z.sum(dim=0)
+
+    shortage = torch.relu(min_nodes_per_cluster - cluster_sizes)
+
+    penalty = (shortage ** 2).sum()
+
     return penalty
 
-
-def compute_pairwise_min_inter_cluster_weight(assignments, edge_index, edge_weight, k, epsilon=0.001):
+def differentiable_sep_penalty(p, edge_index, edge_weight, epsilon=0.001):
+    """
+    Differentiable - gradients flow through p directly.
+    """
     src = edge_index[0]
     dst = edge_index[1]
+    mask = src < dst
+    src, dst = src[mask], dst[mask]
+    ew = edge_weight[mask]
+    total_weight = ew.sum()
 
-    pairwise_between = {}
+    k = p.shape[1]
+    min_between = None
+
     for a in range(k):
         for b in range(a + 1, k):
-            pairwise_between[(a, b)] = 0.0
+            between_ab = (ew * p[src, a] * p[dst, b] + ew * p[src, b] * p[dst, a]).sum()
+            between_ab_normalized = between_ab / total_weight
+            if min_between is None:
+                min_between = between_ab_normalized
+            else:
+                # soft minimum - differentiable
+                min_between = torch.minimum(min_between, between_ab_normalized)
 
-    total_weight = 0.0
-    for i in range(edge_index.shape[1]):
-        u = src[i].item()
-        v = dst[i].item()
-        if u > v:
-            continue
-        w = edge_weight[i].item()
-        total_weight += w
-        cluster_u = assignments[u].item()
-        cluster_v = assignments[v].item()
-        if cluster_u != cluster_v:
-            a, b = sorted((cluster_u, cluster_v))
-            pairwise_between[(a, b)] += w
+    return 1.0 / (epsilon + min_between)
 
-    # normalize each pair by total weight
-    min_between_normalized = min(v / total_weight for v in pairwise_between.values())
-
-    penalty = 1.0 / (epsilon + min_between_normalized)  # range: [1/epsilon down to ~1]
-    return penalty
-
-def empty_cluster_penalty(assignments, k, num_nodes, epsilon=0.001):
-    """
-    Penalizes clusters with zero (or very few) nodes.
-    Normalized by num_nodes, so range is [0, 1] per cluster.
-    """
-    penalty = 0.0
-    for i in range(k):
-        fraction = (assignments == i).sum().item() / num_nodes  # [0, 1]
-        if fraction < epsilon:
-            penalty += 1.0 / (epsilon + fraction)  # large when empty
-    return penalty
 
 
 
@@ -220,7 +212,7 @@ if __name__ == "__main__":
     model = AntiCommunityGNN(in_channels=args.k, hidden_channels=8, out_channels=args.k)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-    epochs = 800
+    epochs = 700
     loss_history = []
 
     for epoch in range(1, epochs + 1):
@@ -228,22 +220,20 @@ if __name__ == "__main__":
         optimizer.zero_grad()
 
         p = model(data.x, data.edge_index, data.edge_weight)
-        assignments = torch.argmax(p, dim=1)
 
-        loss = soft_anticommunity_loss(p, original_edge_index, original_edge_weight)  # [0, 1]
-        sep = compute_pairwise_min_inter_cluster_weight(assignments, original_edge_index, original_edge_weight, args.k)
-        empty = empty_cluster_penalty(assignments, args.k, data.x.shape[0])
+        loss = soft_anticommunity_loss(p, original_edge_index, original_edge_weight)
+        sep = differentiable_sep_penalty(p, original_edge_index, original_edge_weight)
+        empty = hard_empty_penalty_st(p,min_nodes_per_cluster=3)
 
-        total_loss = loss + sep + empty
+        total_loss = loss
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-
-        loss_value = total_loss.item()
-        loss_history.append(loss_value)
+        loss_history.append(total_loss.item())
         if epoch % 10 == 0:
-          cluster_sizes = [(assignments == i).sum().item() for i in range(args.k)]
-          print(f"Epoch {epoch:03d} | loss={loss.item():.4f} | sep={sep:.4f} | empty={empty:.4f} | total={total_loss.item():.4f} | clusters={cluster_sizes}")
-         #print(f"Epoch {epoch:03d} | Loss = {loss_value:.6f}")
+            assignments = torch.argmax(p, dim=1)
+            cluster_sizes = [(assignments == i).sum().item() for i in range(args.k)]
+            print(f"Epoch {epoch:03d} | loss={loss.item():.1f} | clusters={cluster_sizes}")
 
     print("\nTraining finished.")
 
@@ -266,17 +256,17 @@ if __name__ == "__main__":
         assignments = torch.argmax(p, dim=1)
         hard_one_hot = F.one_hot(assignments, num_classes=args.k).float()
 
-        score, intra_weight, total_weight = compute_hard_score(
-            node_ids,
-            assignments,
-            original_edge_index,
-            original_edge_weight
-        )
+    score, intra_weight, total_weight = compute_hard_score(
+    assignments,
+    original_edge_index,
+    original_edge_weight
+)
 
     print("\nFinal hard score:")
     print("Intra-cluster weight:", intra_weight)
     print("Total edge weight:", total_weight)
     print(f"S(G,{args.k}):", score)
+    
 
     print("\nFirst 10 hard assignments:")
     print(assignments[:10])
